@@ -7,7 +7,7 @@ Adafruit_ADS1115 ads;  // Use this for the 16-bit version
 
 // Sensor specifications
 const float fullScaleOutputV = 2.0; // mV/V (sensor output at full scale)
-const float excitationVoltage = 5.0; // V (excitation voltage applied to the sensor)
+const float excitationVoltage = 20.0; // V (excitation voltage applied to the sensor)
 const float fullScaleTorque = 200.0; // in-lb (torque corresponding to the full-scale output)
 
 // Conversion factor from inch-pounds to newton-meters
@@ -20,8 +20,11 @@ const float fullScaleVoltage = fullScaleOutputV * excitationVoltage * 1e-3; // C
 const int chipSelect = 53; // Pin 53 connected to the CS pin of the SD card module
 File dataFile; // File object for writing data
 
-void setup(void)
-{
+// Calibration parameters
+const int calibrationSamples = 200; // Number of samples to take during calibration
+float voltageOffset = 0.0; // Store the calibration offset
+
+void setup(void) {
   Serial.begin(9600);
   Serial.println("Getting differential reading from AIN0 (P) and AIN1 (N)");
   Serial.println("ADC Range: +/- 6.144V (1 bit = 0.1875mV/ADS1115)");
@@ -39,15 +42,13 @@ void setup(void)
         Serial.println("Old NmSec.csv file deleted.");
       } else {
         Serial.println("Failed to delete old NmSec.csv file.");
-      }
-    }
-  }
+      }}}
 
   // Create a new CSV file
   dataFile = SD.open("NmSec.csv", FILE_WRITE);
   if (dataFile) {
     // Write the header line to the CSV file
-    dataFile.println("Time (m),Time (s),Differential Reading (raw),Voltage (mV),Measured Voltage (V),Torque (in-lb),Torque (N·m)");
+    dataFile.println("Time (m),Time (s),Measured Torque (N·m),Calibrated Torque (N·m)");
     dataFile.close(); // Close the file
   } else {
     Serial.println("Failed to create NmSec.csv file.");
@@ -62,7 +63,23 @@ void setup(void)
   }
 
   // Set the gain to ±6.144V (default)
-  ads.setGain(GAIN_TWOTHIRDS);
+  ads.setGain(GAIN_SIXTEEN);
+
+  // Perform calibration to determine the initial offset
+  float totalVoltage = 0.0;
+  for (int i = 0; i < calibrationSamples; i++) {
+    int16_t result = ads.readADC_Differential_0_1();
+    float multiplier = 0.0078125; // For ADS1115 @ ±6.144V gain (16-bit results)
+    float voltage = result * multiplier;  // Result in millivolts
+    totalVoltage += voltage;
+    delay(100); // Small delay between readings
+  }
+
+  // Calculate the average voltage during calibration
+  voltageOffset = totalVoltage / calibrationSamples;
+  Serial.print("Calibration complete. Voltage offset: ");
+  Serial.print(voltageOffset);
+  Serial.println(" mV");
 }
 
 void loop(void)
@@ -71,17 +88,26 @@ void loop(void)
   int16_t result = ads.readADC_Differential_0_1();
 
   // Calculate the voltage based on the result
-  float multiplier = 0.1875F; // For ADS1115 @ ±6.144V gain (16-bit results)
+  float multiplier = 0.0078125; // For ADS1115 @ ±6.144V gain (16-bit results)
   float voltage = result * multiplier;  // Result in millivolts
 
-  // Convert voltage from millivolts to volts
+  // Measured (uncalibrated) voltage
   float measuredVoltage = voltage * 1e-3; // Convert to volts
-
-  // Calculate the Torque
-  float torqueInInLb = (measuredVoltage / fullScaleVoltage) * fullScaleTorque;
   
-  // Convert torque from inch-pounds to newton-meters
-  float torqueInNm = torqueInInLb * inchToNmConversionFactor;
+  // Calibrated voltage (offset-corrected)
+  float calibratedVoltage = (voltage - voltageOffset) * 1e-3; // Convert to volts
+
+  // Calculate the Torque for measured (uncalibrated) voltage
+  float measuredTorqueInInLb = (measuredVoltage / fullScaleVoltage) * fullScaleTorque;
+  
+  // Convert measured torque from inch-pounds to newton-meters
+  float measuredTorqueInNm = measuredTorqueInInLb * inchToNmConversionFactor;
+
+  // Calculate the Torque for calibrated voltage
+  float calibratedTorqueInInLb = (calibratedVoltage / fullScaleVoltage) * fullScaleTorque;
+
+  // Convert calibrated torque from inch-pounds to newton-meters
+  float calibratedTorqueInNm = calibratedTorqueInInLb * inchToNmConversionFactor;
 
   // Get the current time (in milliseconds) since the board started
   unsigned long currentTime = millis();
@@ -91,21 +117,15 @@ void loop(void)
   unsigned long minutes = seconds / 60;
   seconds = seconds % 60; // Remaining seconds
 
-  // Print all information in Serial Monitor
+  // Print both measured and calibrated torque in Newton-meters (Nm) in Serial Monitor
   Serial.print("Time: ");
   Serial.print(minutes);
   Serial.print("m ");
   Serial.print(seconds);
-  Serial.print("s - Differential Reading: ");
-  Serial.print(result);
-  Serial.print(" (");
-  Serial.print(voltage);
-  Serial.print(" mV), Measured Voltage: ");
-  Serial.print(measuredVoltage, 6); // Print voltage in volts with six decimal places
-  Serial.print(" V, Calculated Torque: ");
-  Serial.print(torqueInInLb);
-  Serial.print(" in-lb, Calculated Torque: ");
-  Serial.print(torqueInNm);
+  Serial.print("s - Measured Torque: ");
+  Serial.print(measuredTorqueInNm, 6); // Print measured torque in Nm with six decimal places
+  Serial.print(" N·m, Calibrated Torque: ");
+  Serial.print(calibratedTorqueInNm, 6); // Print calibrated torque in Nm with six decimal places
   Serial.println(" N·m");
 
   // Write all information to SD card
@@ -115,19 +135,15 @@ void loop(void)
     dataFile.print(",");
     dataFile.print(seconds);
     dataFile.print(",");
-    dataFile.print(result);
+    dataFile.print(measuredTorqueInNm, 6); // Print measured torque in Nm with six decimal places
     dataFile.print(",");
-    dataFile.print(voltage);
-    dataFile.print(",");
-    dataFile.print(measuredVoltage, 6); // Print voltage in volts with six decimal places
-    dataFile.print(",");
-    dataFile.print(torqueInInLb);
-    dataFile.print(",");
-    dataFile.println(torqueInNm);
+    dataFile.println(calibratedTorqueInNm, 6); // Print calibrated torque in Nm with six decimal places
     dataFile.close(); // Close the file
   } else {
     Serial.println("Failed to write to NmSec.csv file.");
   }
-
-  delay(1000); // Delay before the next loop iteration
+  delay(100); // Delay before the next loop iteration (Record every 0.1 Seconds)
 }
+
+
+
