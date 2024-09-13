@@ -167,7 +167,6 @@ void logDataToSD(float time, float dacValue, float speed, float angle, float tot
 }
 
 void moveMotor(float targetAngle, int direction, unsigned long cycleStartTime) {
-    // direction: 1 for forward, -1 for backward
     unsigned long startTime = millis();
     float angleCovered = 0.0;
     float elapsedTime;
@@ -195,22 +194,22 @@ void moveMotor(float targetAngle, int direction, unsigned long cycleStartTime) {
 
         // Log data at 0.1-second intervals
         if (currentTime - lastLogTime >= 100) { // 100 ms = 0.1 seconds
-            totalTime += 0.1; // Increment total time by 0.1 seconds
-            Serial.print("Elapsed Time: ");
-            Serial.print(elapsedTime, 2);
-            Serial.print(" s, Angle Covered: ");
-            Serial.print(angleCovered, 2);
-            Serial.print(" degrees, Total Time: ");
+            totalTime += 1; // Increment total time by 0.1 seconds
+            Serial.print(elapsedTime, 3);
+            Serial.print(", ");
             Serial.print(totalTime, 2);
-            Serial.print(" s, Direction: ");
+            Serial.print(", ");
+            Serial.print(angleCovered, 2);
+            Serial.print(", ");
             Serial.println(direction == 1 ? "Forward" : "Backward");
+
 
             logDataToSD(elapsedTime, (speed / 10.0), speed, angleCovered, totalTime, direction);
             lastLogTime = currentTime; // Update last log time
         }
 
-        // Optional delay to manage loop speed
-        delay(1); // Reduce delay for more responsiveness
+
+        
     }
 
     // Stop the motor and reset control
@@ -219,10 +218,14 @@ void moveMotor(float targetAngle, int direction, unsigned long cycleStartTime) {
     dac.setVoltage(0, false);
 }
 
+
 void loop() {
     unsigned long cycleStartTime;
 
+    Serial.print("Elapsed Time(sec), Angle Covered (degrees), Total Time, Direction ");
+
     for (int i = 0; i < NumCycles; i++) {
+
         cycleStartTime = millis(); // Record the start time of the cycle
         
         // Move in the REV direction
