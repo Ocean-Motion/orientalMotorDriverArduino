@@ -149,7 +149,6 @@ void loop() {
         moveMotor(targetAngle, direction, cycleStartTime);
         delay(pause1); // Pause after reaching target angle
 
-
         moveMotor(targetAngle, -direction, cycleStartTime);
         delay(pause2); // Pause after returning to original position
     }
